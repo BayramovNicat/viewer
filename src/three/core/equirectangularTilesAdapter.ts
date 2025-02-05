@@ -86,7 +86,7 @@ export function equirectangularTilesAdapter(
   const matrix4 = new Matrix4();
   const box3 = new Box3();
 
-  const SPHERE_SEGMENTS = config.resolution || 128;
+  const SPHERE_SEGMENTS = config.resolution || 64;
   const SPHERE_HORIZONTAL_SEGMENTS = SPHERE_SEGMENTS / 2;
 
   console.log({ SPHERE_SEGMENTS, SPHERE_HORIZONTAL_SEGMENTS });
