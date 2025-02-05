@@ -1,408 +1,192 @@
+import {
+  MathUtils,
+  PerspectiveCamera,
+  Scene,
+  SRGBColorSpace,
+  Vector3,
+  WebGLRenderer,
+} from "three";
+import { equirectangularTilesAdapter } from "./core/equirectangularTilesAdapter";
 import "./style.css";
-import { mat4 } from "gl-matrix";
 
-const canvas = document.getElementById("viewer") as HTMLCanvasElement;
+const SPHERE_RADIUS = 10;
+const vector = new Vector3();
 
-setTimeout(() => {
-  const viewer = createPanoramaViewer(canvas, "/panorama.jpeg");
-  if (!viewer) return;
-  viewer.yaw = 90;
-}, 10);
+async function init() {
+  let isUserInteracting = false,
+    onPointerDownMouseX = 0,
+    onPointerDownMouseY = 0,
+    lon = 0,
+    onPointerDownLon = 0,
+    lat = 0,
+    onPointerDownLat = 0,
+    phi = 0,
+    theta = 0;
 
-function createPanoramaViewer(canvas: HTMLCanvasElement, url: string) {
-  let width = 1;
-  let height = 1;
+  const direction = new Vector3();
 
-  resizeCanvas();
+  const renderer = new WebGLRenderer({ alpha: true, antialias: true });
+  const app = document.getElementById("app")!;
+  app.appendChild(renderer.domElement);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setAnimationLoop(animate);
 
-  const gl = canvas.getContext("webgl")!;
-  if (!gl) {
-    console.error("WebGL not supported");
-    return;
-  }
+  const camera = new PerspectiveCamera(
+    90,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    2 * SPHERE_RADIUS
+  );
+  // camera.position.set(0, 0, 0.1); // Set initial camera position
+  camera.matrixAutoUpdate = false;
 
-  const shaderProgram = initShaderProgram()!;
-  const programInfo = getProgramInfo(shaderProgram);
-  const sphere = createSphere(30, 30);
-  const buffers = initBuffers(sphere);
-  const texture = loadTexture(url);
+  const adapter = equirectangularTilesAdapter({ camera, direction });
 
-  let isDragging = false;
-  let yaw = 0;
-  let pitch = 0;
-  let fov = deg2rad(90);
-
-  setupPointerEvents();
-  setupScrollEvent();
-
-  window.addEventListener("resize", () => {
-    resizeCanvas();
-    drawScene();
+  const scene = new Scene();
+  const textureData = await adapter.loadTexture({
+    width: 8192,
+    cols: 16,
+    rows: 8,
+    baseUrl: `./panorama_thumb.jpeg`,
+    tileUrl: (col: number, row: number) => {
+      return `./tiles/image${col + 1}x${row + 1}.jpg`;
+    },
   });
+  textureData.texture.colorSpace = SRGBColorSpace;
+  const mesh = adapter.createMesh(textureData.panoData!);
+  // mesh.material.map = textureData.texture; // Assign the texture to the material
+  adapter.setTexture(mesh, textureData);
+  scene.add(mesh);
 
-  drawScene();
+  app.addEventListener("pointerdown", onPointerDown);
+  document.addEventListener("wheel", onDocumentMouseWheel);
+  window.addEventListener("resize", onWindowResize);
 
-  function resizeCanvas() {
-    const parentElement = canvas.parentElement;
-    width = parentElement?.clientWidth || 1;
-    height = parentElement?.clientHeight || 1;
-    canvas.width = width;
-    canvas.height = height;
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  function initShaderProgram() {
-    const vsSource = `
-      attribute vec4 aVertexPosition;
-      attribute vec2 aTextureCoord;
-      varying highp vec2 vTextureCoord;
-      uniform mat4 uModelViewMatrix;
-      uniform mat4 uProjectionMatrix;
-      void main(void) {
-        gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-        vTextureCoord = aTextureCoord;
-      }
-    `;
+  function onPointerDown(event: PointerEvent) {
+    if (event.isPrimary === false) return;
 
-    const fsSource = `
-      varying highp vec2 vTextureCoord;
-      uniform sampler2D uSampler;
-      void main(void) {
-        gl_FragColor = texture2D(uSampler, vTextureCoord);
-      }
-    `;
+    isUserInteracting = true;
 
-    const vertexShader = loadShader(gl.VERTEX_SHADER, vsSource)!;
-    const fragmentShader = loadShader(gl.FRAGMENT_SHADER, fsSource)!;
+    onPointerDownMouseX = event.clientX;
+    onPointerDownMouseY = event.clientY;
 
-    const shaderProgram = gl.createProgram()!;
-    gl.attachShader(shaderProgram, vertexShader);
-    gl.attachShader(shaderProgram, fragmentShader);
-    gl.linkProgram(shaderProgram);
+    onPointerDownLon = lon;
+    onPointerDownLat = lat;
 
-    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-      console.error(
-        "Unable to initialize the shader program: " +
-          gl.getProgramInfoLog(shaderProgram)
-      );
-      return null;
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  }
+
+  function onPointerMove(event: PointerEvent) {
+    if (event.isPrimary === false) return;
+
+    lon = (onPointerDownMouseX - event.clientX) * 0.1 + onPointerDownLon;
+    lat = (event.clientY - onPointerDownMouseY) * 0.1 + onPointerDownLat;
+  }
+
+  function onPointerUp(event: PointerEvent) {
+    if (event.isPrimary === false) return;
+
+    isUserInteracting = false;
+
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+  }
+
+  function onDocumentMouseWheel(event: WheelEvent) {
+    const fov = camera.fov + event.deltaY * 0.05;
+
+    camera.fov = MathUtils.clamp(fov, 10, 75);
+
+    camera.updateProjectionMatrix();
+  }
+
+  function animate() {
+    if (isUserInteracting === false) {
+      lon += 0.1;
     }
+    adapter.refresh();
 
-    return shaderProgram;
-  }
+    lat = Math.max(-85, Math.min(85, lat));
+    phi = MathUtils.degToRad(90 - lat);
+    theta = MathUtils.degToRad(lon);
 
-  function loadShader(type: WebGLProgram, source: any) {
-    const shader = gl.createShader(type as any)!;
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
+    vector.x = SPHERE_RADIUS * Math.sin(phi) * Math.cos(theta);
+    vector.y = SPHERE_RADIUS * Math.cos(phi);
+    vector.z = SPHERE_RADIUS * Math.sin(phi) * Math.sin(theta);
+    // direction.set(x, y, z);
 
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      console.error(
-        "An error occurred compiling the shaders: " +
-          gl.getShaderInfoLog(shader)
-      );
-      gl.deleteShader(shader);
-      return null;
-    }
+    // theta rad2deg
+    // theta = ;
 
-    return shader;
-  }
+    // console.log(MathUtils.radToDeg(theta));
 
-  function getProgramInfo(shaderProgram: WebGLProgram) {
-    return {
-      program: shaderProgram,
-      attribLocations: {
-        vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
-        textureCoord: gl.getAttribLocation(shaderProgram, "aTextureCoord"),
+    sphericalCoordsToVector3(
+      {
+        yaw: theta,
+        pitch: phi,
       },
-      uniformLocations: {
-        projectionMatrix: gl.getUniformLocation(
-          shaderProgram,
-          "uProjectionMatrix"
-        ),
-        modelViewMatrix: gl.getUniformLocation(
-          shaderProgram,
-          "uModelViewMatrix"
-        ),
-        uSampler: gl.getUniformLocation(shaderProgram, "uSampler"),
-      },
-    };
+      direction
+    );
+    // direction.set(x, y, z);
+
+    const position = vector3ToSphericalCoords(vector);
+    sphericalCoordsToVector3(position, direction);
+
+    // console log direction angle
+    // console.log(MathUtils.radToDeg(Math.atan2(direction.x, direction.z)));
+
+    // camera.lookAt(x, y, z);
+    // camera.updateMatrix(); // Update the camera matrix
+
+    camera.position.set(0, 0, 0);
+    camera.lookAt(direction);
+
+    camera.updateMatrix();
+    camera.updateMatrixWorld();
+
+    renderer.render(scene, camera);
   }
+}
 
-  function initBuffers(sphere: any) {
-    const positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array(sphere.positions),
-      gl.STATIC_DRAW
-    );
+init();
 
-    const textureCoordBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, textureCoordBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array(sphere.textureCoordinates),
-      gl.STATIC_DRAW
-    );
-
-    const indexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-    gl.bufferData(
-      gl.ELEMENT_ARRAY_BUFFER,
-      new Uint16Array(sphere.indices),
-      gl.STATIC_DRAW
-    );
-
-    return {
-      position: positionBuffer,
-      textureCoord: textureCoordBuffer,
-      indices: indexBuffer,
-    };
+function sphericalCoordsToVector3(
+  position: Position,
+  vector?: Vector3,
+  distance = SPHERE_RADIUS
+): Vector3 {
+  if (!vector) {
+    vector = new Vector3();
   }
+  vector.x = distance * -Math.cos(position.pitch) * Math.sin(position.yaw);
+  vector.y = distance * Math.sin(position.pitch);
+  vector.z = distance * Math.cos(position.pitch) * Math.cos(position.yaw);
+  return vector;
+}
 
-  function loadTexture(url: string) {
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-
-    const level = 0;
-    const internalFormat = gl.RGBA;
-    const width = 1;
-    const height = 1;
-    const border = 0;
-    const srcFormat = gl.RGBA;
-    const srcType = gl.UNSIGNED_BYTE;
-    const pixel = new Uint8Array([0, 0, 0, 0]);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      level,
-      internalFormat,
-      width,
-      height,
-      border,
-      srcFormat,
-      srcType,
-      pixel
-    );
-
-    const image = new Image();
-    image.onload = function () {
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        image
-      );
-
-      if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
-        gl.generateMipmap(gl.TEXTURE_2D);
-      } else {
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      }
-
-      drawScene();
-    };
-    image.src = url;
-
-    return texture;
-  }
-
-  function setupPointerEvents() {
-    let previousMouseX = 0;
-    let previousMouseY = 0;
-
-    canvas.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      isDragging = true;
-      canvas.style.cursor = "all-scroll";
-      previousMouseX = e.clientX;
-      previousMouseY = e.clientY;
-    });
-
-    document.addEventListener("pointermove", (e) => {
-      if (!isDragging) return;
-      e.preventDefault();
-
-      const deltaX = e.clientX - previousMouseX;
-      const deltaY = e.clientY - previousMouseY;
-
-      const rotationSpeed = 0.005 * (90 / ((fov * 180) / Math.PI));
-
-      yaw -= deltaX * rotationSpeed;
-      pitch -= deltaY * rotationSpeed;
-
-      const maxPitch = Math.PI / 2;
-      const minPitch = -Math.PI / 2;
-      pitch = clamp(pitch, minPitch, maxPitch);
-
-      previousMouseX = e.clientX;
-      previousMouseY = e.clientY;
-
-      drawScene();
-    });
-
-    document.addEventListener("pointerup", () => {
-      isDragging = false;
-      canvas.style.cursor = "";
-    });
-  }
-
-  function setupScrollEvent() {
-    canvas.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      const zoomSpeed = 0.1;
-      fov += e.deltaY * zoomSpeed * (Math.PI / 180);
-      fov = clamp(fov, deg2rad(30), deg2rad(120));
-      drawScene();
-    });
-  }
-
-  function drawScene() {
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    const aspect = width / height;
-    const zNear = 0.1;
-    const zFar = 100.0;
-    const projectionMatrix = mat4.create();
-
-    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-
-    mat4.perspective(projectionMatrix, fov, aspect, zNear, zFar);
-
-    const modelViewMatrix = mat4.create();
-    mat4.rotate(modelViewMatrix, modelViewMatrix, pitch, [1, 0, 0]);
-    mat4.rotate(modelViewMatrix, modelViewMatrix, yaw, [0, 1, 0]);
-
-    // Set up vertex positions
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
-    gl.vertexAttribPointer(
-      programInfo.attribLocations.vertexPosition,
-      3, // numComponents
-      gl.FLOAT, // type
-      false, // normalize
-      0, // stride
-      0 // offset
-    );
-    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
-
-    // Set up texture coordinates
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.textureCoord);
-    gl.vertexAttribPointer(
-      programInfo.attribLocations.textureCoord,
-      2, // numComponents
-      gl.FLOAT, // type
-      false, // normalize
-      0, // stride
-      0 // offset
-    );
-    gl.enableVertexAttribArray(programInfo.attribLocations.textureCoord);
-
-    gl.useProgram(programInfo.program);
-
-    gl.uniformMatrix4fv(
-      programInfo.uniformLocations.projectionMatrix,
-      false,
-      projectionMatrix
-    );
-    gl.uniformMatrix4fv(
-      programInfo.uniformLocations.modelViewMatrix,
-      false,
-      modelViewMatrix
-    );
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.uniform1i(programInfo.uniformLocations.uSampler, 0);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
-    gl.drawElements(gl.TRIANGLES, sphere.indexCount, gl.UNSIGNED_SHORT, 0);
-  }
+function vector3ToSphericalCoords(vector: Vector3): Position {
+  const phi = Math.acos(
+    vector.y /
+      Math.sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z)
+  );
+  const theta = Math.atan2(vector.x, vector.z);
 
   return {
-    get yaw() {
-      return rad2deg(yaw);
-    },
-    set yaw(value) {
-      yaw = deg2rad(value);
-      drawScene();
-    },
-    get pitch() {
-      return rad2deg(pitch);
-    },
-    set pitch(value) {
-      pitch = deg2rad(value);
-      drawScene();
-    },
-    get fov() {
-      return rad2deg(fov);
-    },
-    set fov(value) {
-      fov = deg2rad(value);
-      drawScene();
-    },
+    yaw: theta < 0 ? -theta : Math.PI * 2 - theta,
+    pitch: Math.PI / 2 - phi,
   };
 }
 
-function createSphere(latitudeBands: number, longitudeBands: number) {
-  const positions = [];
-  const textureCoordinates = [];
-  const indices = [];
-
-  for (let latNumber = 0; latNumber <= latitudeBands; latNumber++) {
-    const theta = (latNumber * Math.PI) / latitudeBands;
-    const sinTheta = Math.sin(theta);
-    const cosTheta = Math.cos(theta);
-
-    for (let longNumber = 0; longNumber <= longitudeBands; longNumber++) {
-      const phi = (longNumber * 2 * Math.PI) / longitudeBands;
-      const sinPhi = Math.sin(phi);
-      const cosPhi = Math.cos(phi);
-
-      const x = cosPhi * sinTheta;
-      const y = cosTheta;
-      const z = sinPhi * sinTheta;
-      const u = 1 - longNumber / longitudeBands;
-      const v = latNumber / latitudeBands;
-
-      positions.push(x, y, z);
-      textureCoordinates.push(u, v);
-    }
-  }
-
-  for (let latNumber = 0; latNumber < latitudeBands; latNumber++) {
-    for (let longNumber = 0; longNumber < longitudeBands; longNumber++) {
-      const first = latNumber * (longitudeBands + 1) + longNumber;
-      const second = first + longitudeBands + 1;
-
-      indices.push(first, second, first + 1);
-      indices.push(second, second + 1, first + 1);
-    }
-  }
-
-  return {
-    positions: positions,
-    textureCoordinates: textureCoordinates,
-    indices: indices,
-    indexCount: indices.length,
-  };
-}
-
-function isPowerOf2(value: number) {
-  return (value & (value - 1)) === 0;
-}
-
-function deg2rad(degrees: number) {
-  return (degrees * Math.PI) / 180;
-}
-
-function rad2deg(radians: number) {
-  return (radians * 180) / Math.PI;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
+type Position = {
+  yaw: number;
+  pitch: number;
+};

@@ -9,10 +9,12 @@
     "preview": "vite preview"
   },
   "devDependencies": {
+    "@types/three": "^0.173.0",
     "typescript": "~5.6.2",
     "vite": "^6.0.5"
   },
   "dependencies": {
-    "gl-matrix": "^3.4.3"
+    "gl-matrix": "^3.4.3",
+    "three": "^0.173.0"
   }
 }
