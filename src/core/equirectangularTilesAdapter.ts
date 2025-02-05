@@ -16,7 +16,7 @@ import {
   Texture,
   Vector3,
 } from "three";
-import { equirectangularAdapter } from "./EquirectangularAdapter";
+import { equirectangularAdapter } from "./equirectangularAdapter";
 import {
   EquirectangularMesh,
   EquirectangularMultiTilesPanorama,
@@ -432,7 +432,7 @@ export function equirectangularTilesAdapter(
           needsUpdate();
         }
       })
-      .catch((err) => {
+      .catch(() => {
         if (!task.isCancelled() && config.showErrorTile) {
           //   if (!state.errorMaterial) {
           //     state.errorMaterial = buildErrorMaterial();
