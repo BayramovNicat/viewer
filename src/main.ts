@@ -70,35 +70,43 @@ async function init() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  function onPointerDown(event: PointerEvent) {
-    if (event.isPrimary === false) return;
-
+  function onPointerDown(event: MouseEvent | TouchEvent) {
     isUserInteracting = true;
 
-    onPointerDownMouseX = event.clientX;
-    onPointerDownMouseY = event.clientY;
+    const clientX =
+      event instanceof MouseEvent ? event.clientX : event.touches[0].clientX;
+    const clientY =
+      event instanceof MouseEvent ? event.clientY : event.touches[0].clientY;
+
+    onPointerDownMouseX = clientX;
+    onPointerDownMouseY = clientY;
 
     onPointerDownLon = lon;
     onPointerDownLat = lat;
 
-    document.addEventListener("pointermove", onPointerMove);
-    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("touchmove", onPointerMove);
+    document.addEventListener("touchend", onPointerUp);
+    document.addEventListener("mousemove", onPointerMove);
+    document.addEventListener("mouseup", onPointerUp);
   }
 
-  function onPointerMove(event: PointerEvent) {
-    if (event.isPrimary === false) return;
+  function onPointerMove(event: MouseEvent | TouchEvent) {
+    const clientX =
+      event instanceof MouseEvent ? event.clientX : event.touches[0].clientX;
+    const clientY =
+      event instanceof MouseEvent ? event.clientY : event.touches[0].clientY;
 
-    lon = (onPointerDownMouseX - event.clientX) * 0.1 + onPointerDownLon;
-    lat = (event.clientY - onPointerDownMouseY) * 0.1 + onPointerDownLat;
+    lon = (onPointerDownMouseX - clientX) * 0.1 + onPointerDownLon;
+    lat = (clientY - onPointerDownMouseY) * 0.1 + onPointerDownLat;
   }
 
-  function onPointerUp(event: PointerEvent) {
-    if (event.isPrimary === false) return;
-
+  function onPointerUp() {
     isUserInteracting = false;
 
-    document.removeEventListener("pointermove", onPointerMove);
-    document.removeEventListener("pointerup", onPointerUp);
+    document.removeEventListener("mousemove", onPointerMove);
+    document.removeEventListener("mouseup", onPointerUp);
+    document.removeEventListener("touchmove", onPointerMove);
+    document.removeEventListener("touchend", onPointerUp);
   }
 
   function onDocumentMouseWheel(event: WheelEvent) {
