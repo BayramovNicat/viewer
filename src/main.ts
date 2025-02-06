@@ -1,9 +1,24 @@
 import "./style.css";
 import { mat4 } from "gl-matrix";
 
-const viewer = createPanoramaViewer("app", "/panorama.jpeg");
-viewer.yaw = 180;
-viewer.fov = 180;
+const DPR = window.devicePixelRatio;
+const MIN_FOV = 30;
+const MAX_FOV = 120;
+
+const NB_VERTICES_BY_FACE = 6;
+const NB_VERTICES_BY_SMALL_FACE = 3;
+
+const SPHERE_RADIUS = 10;
+const SPHERE_SEGMENTS: 16 | 32 | 64 | 96 | 128 = 128;
+const SPHERE_HORIZONTAL_SEGMENTS = SPHERE_SEGMENTS / 2;
+
+const NB_VERTICES =
+  2 * SPHERE_SEGMENTS * NB_VERTICES_BY_SMALL_FACE +
+  (SPHERE_HORIZONTAL_SEGMENTS - 2) * SPHERE_SEGMENTS * NB_VERTICES_BY_FACE;
+const NB_GROUPS = SPHERE_SEGMENTS * SPHERE_HORIZONTAL_SEGMENTS;
+
+const viewer = createPanoramaViewer("app", "./panorama/panorama.webp");
+viewer.yaw = 0;
 
 function createPanoramaViewer(elmId: string, url: string) {
   const container = document.getElementById(elmId)!;
@@ -11,9 +26,6 @@ function createPanoramaViewer(elmId: string, url: string) {
     throw Error("Container not found");
   }
 
-  const DPR = window.devicePixelRatio;
-  const MIN_FOV = 10;
-  const MAX_FOV = 140;
   let width = 1;
   let height = 1;
 
@@ -27,7 +39,45 @@ function createPanoramaViewer(elmId: string, url: string) {
   const shaderProgram = initShaderProgram();
   const programInfo = getProgramInfo(shaderProgram);
 
-  const geometry = sphereGeometry(100, 128, 64);
+  const geometry = sphereGeometry(
+    SPHERE_RADIUS,
+    SPHERE_SEGMENTS,
+    SPHERE_HORIZONTAL_SEGMENTS,
+    -Math.PI / 2
+  );
+
+  //   console.log(geometry.indices);
+
+  let i = 0;
+  let k = 0;
+  // first row
+  for (
+    ;
+    i < SPHERE_SEGMENTS * NB_VERTICES_BY_SMALL_FACE;
+    i += NB_VERTICES_BY_SMALL_FACE
+  ) {
+    // console.log(i, NB_VERTICES_BY_SMALL_FACE, k++);
+    // geometry.addGroup(i, NB_VERTICES_BY_SMALL_FACE, k++);
+  }
+  // second to before last rows
+  for (
+    ;
+    i < NB_VERTICES - SPHERE_SEGMENTS * NB_VERTICES_BY_SMALL_FACE;
+    i += NB_VERTICES_BY_FACE
+  ) {
+    // console.log(i, NB_VERTICES_BY_FACE, k++);
+    // geometry.addGroup(i, NB_VERTICES_BY_FACE, k++);
+  }
+  // last row
+  for (; i < NB_VERTICES; i += NB_VERTICES_BY_SMALL_FACE) {
+    // console.log(i, NB_VERTICES_BY_SMALL_FACE, k++);
+    // geometry.addGroup(i, NB_VERTICES_BY_SMALL_FACE, k++);
+  }
+
+  for (let g = 0; g < NB_GROUPS; g++) {
+    // console.log(NB_GROUPS);
+    // materials.push(material);
+  }
 
   const webglAttrs = webGLAttributes(gl);
   const buffers = initBuffers(geometry);
@@ -39,7 +89,6 @@ function createPanoramaViewer(elmId: string, url: string) {
   let fov = deg2rad(90);
 
   setupPointerEvents();
-  setupScrollEvent();
 
   window.addEventListener("resize", () => {
     resizeCanvas();
@@ -180,23 +229,22 @@ function createPanoramaViewer(elmId: string, url: string) {
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
 
-    const level = 0;
-    const internalFormat = gl.RGBA;
-    const width = 1;
-    const height = 1;
-    const border = 0;
-    const srcFormat = gl.RGBA;
-    const srcType = gl.UNSIGNED_BYTE;
-    const pixel = new Uint8Array([0, 0, 0, 0]);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    // Create a temporary 1x1 pixel texture while loading
+    const pixel = new Uint8Array([0, 0, 0, 255]);
     gl.texImage2D(
       gl.TEXTURE_2D,
-      level,
-      internalFormat,
-      width,
-      height,
-      border,
-      srcFormat,
-      srcType,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
       pixel
     );
 
@@ -212,70 +260,113 @@ function createPanoramaViewer(elmId: string, url: string) {
         image
       );
 
-      if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
-        gl.generateMipmap(gl.TEXTURE_2D);
-      } else {
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      }
-
       drawScene();
+
+      image.onload = null;
+      URL.revokeObjectURL(image.src);
     };
+    image.crossOrigin = "anonymous";
     image.src = url;
 
     return texture;
   }
 
   function setupPointerEvents() {
-    let previousMouseX = 0;
-    let previousMouseY = 0;
+    let previousX = 0;
+    let previousY = 0;
 
-    canvas.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
+    const handleStart = (x: number, y: number) => {
+      previousX = x;
+      previousY = y;
+
       isDragging = true;
       canvas.style.cursor = "all-scroll";
-      previousMouseX = e.clientX;
-      previousMouseY = e.clientY;
-    });
+    };
 
-    document.addEventListener("pointermove", (e) => {
+    const handleMove = (x: number, y: number) => {
       if (!isDragging) return;
-      e.preventDefault();
 
-      const deltaX = e.clientX - previousMouseX;
-      const deltaY = e.clientY - previousMouseY;
+      const deltaX = x - previousX;
+      const deltaY = y - previousY;
 
-      const rotationSpeed = 0.005 * (90 / ((fov * 180) / Math.PI));
+      // Adjust rotation speed based on FOV using a similar approach to Marzipano
+      const rotationSpeed = 6 * Math.tan(fov / 4);
 
-      yaw -= deltaX * rotationSpeed;
-      pitch -= deltaY * rotationSpeed;
+      yaw -= (deltaX * rotationSpeed) / width;
+      pitch -= (deltaY * rotationSpeed) / height;
 
       const maxPitch = Math.PI / 2;
       const minPitch = -Math.PI / 2;
       pitch = clamp(pitch, minPitch, maxPitch);
 
-      previousMouseX = e.clientX;
-      previousMouseY = e.clientY;
+      previousX = x;
+      previousY = y;
 
       drawScene();
-    });
+    };
 
-    document.addEventListener("pointerup", () => {
+    const handleEnd = () => {
       isDragging = false;
       canvas.style.cursor = "";
-    });
-  }
+    };
 
-  function setupScrollEvent() {
-    canvas.addEventListener("wheel", (e) => {
+    canvas.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
       e.preventDefault();
-      const zoomSpeed = 0.1;
-      fov += e.deltaY * zoomSpeed * (Math.PI / 180);
-      fov = clamp(fov, deg2rad(MIN_FOV), deg2rad(MAX_FOV));
-      drawScene();
+      handleStart(e.clientX, e.clientY);
     });
+
+    document.addEventListener("mousemove", (e) => {
+      handleMove(e.clientX, e.clientY);
+    });
+
+    document.addEventListener("mouseup", () => {
+      handleEnd();
+    });
+
+    canvas.addEventListener(
+      "touchstart",
+      (e) => {
+        if (e.touches.length === 1) {
+          e.preventDefault();
+          const touch = e.touches[0];
+          handleStart(touch.clientX, touch.clientY);
+        }
+      },
+      { passive: false }
+    );
+
+    document.addEventListener(
+      "touchmove",
+      (e) => {
+        if (e.touches.length === 1) {
+          e.preventDefault();
+          const touch = e.touches[0];
+          handleMove(touch.clientX, touch.clientY);
+        }
+      },
+      { passive: false }
+    );
+
+    document.addEventListener(
+      "touchend",
+      () => {
+        handleEnd();
+      },
+      { passive: false }
+    );
+
+    canvas.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault();
+        const zoomSpeed = 0.1;
+        fov += e.deltaY * zoomSpeed * (Math.PI / 180);
+        fov = clamp(fov, deg2rad(MIN_FOV), deg2rad(MAX_FOV));
+        drawScene();
+      },
+      { passive: false }
+    );
   }
 
   function drawScene() {
@@ -533,7 +624,7 @@ function sphereGeometry(
       normals.push(normal.x, normal.y, normal.z);
 
       // uv
-      uvs.push(1 - u + uOffset, v);
+      uvs.push(1 - u, v);
 
       verticesRow.push(index++);
     }
