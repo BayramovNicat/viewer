@@ -18,7 +18,7 @@ const NB_VERTICES =
 const NB_GROUPS = SPHERE_SEGMENTS * SPHERE_HORIZONTAL_SEGMENTS;
 
 const viewer = createPanoramaViewer("app", "./panorama/panorama.webp");
-viewer.yaw = 0;
+viewer.yaw = 78.599999994522;
 
 function createPanoramaViewer(elmId: string, url: string) {
   const container = document.getElementById(elmId)!;
@@ -38,6 +38,8 @@ function createPanoramaViewer(elmId: string, url: string) {
 
   const shaderProgram = initShaderProgram();
   const programInfo = getProgramInfo(shaderProgram);
+  const projectionMatrix = mat4.create();
+  const modelViewMatrix = mat4.create();
 
   const geometry = sphereGeometry(
     SPHERE_RADIUS,
@@ -88,20 +90,15 @@ function createPanoramaViewer(elmId: string, url: string) {
   let pitch = 0;
   let fov = deg2rad(90);
 
-  setupPointerEvents();
-
-  window.addEventListener("resize", () => {
-    resizeCanvas();
-    drawScene();
-  });
-
-  drawScene();
+  setupGL();
+  setupEventListeners();
 
   function resizeCanvas() {
     width = container.clientWidth;
     height = container.clientHeight;
     canvas.width = width * DPR;
     canvas.height = height * DPR;
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
   }
 
   function initShaderProgram(): WebGLProgram {
@@ -260,7 +257,7 @@ function createPanoramaViewer(elmId: string, url: string) {
         image
       );
 
-      drawScene();
+      refresh();
 
       image.onload = null;
       URL.revokeObjectURL(image.src);
@@ -271,7 +268,7 @@ function createPanoramaViewer(elmId: string, url: string) {
     return texture;
   }
 
-  function setupPointerEvents() {
+  function setupEventListeners() {
     let previousX = 0;
     let previousY = 0;
 
@@ -302,7 +299,7 @@ function createPanoramaViewer(elmId: string, url: string) {
       previousX = x;
       previousY = y;
 
-      drawScene();
+      refresh();
     };
 
     const handleEnd = () => {
@@ -363,69 +360,76 @@ function createPanoramaViewer(elmId: string, url: string) {
         const zoomSpeed = 0.1;
         fov += e.deltaY * zoomSpeed * (Math.PI / 180);
         fov = clamp(fov, deg2rad(MIN_FOV), deg2rad(MAX_FOV));
-        drawScene();
+        refresh();
       },
       { passive: false }
     );
+
+    window.addEventListener("resize", () => {
+      resizeCanvas();
+      refresh();
+    });
   }
 
-  function drawScene() {
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    const aspect = width / height;
-    const zNear = 0.1;
-    const zFar = 100.0;
-    const projectionMatrix = mat4.create();
-
+  function setupGL() {
+    // One-time WebGL setup
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.useProgram(programInfo.program);
 
-    mat4.perspective(projectionMatrix, fov, aspect, zNear, zFar);
-
-    const modelViewMatrix = mat4.create();
-    mat4.rotate(modelViewMatrix, modelViewMatrix, pitch, [1, 0, 0]);
-    mat4.rotate(modelViewMatrix, modelViewMatrix, yaw, [0, 1, 0]);
-
-    // Set up vertex positions
+    // Set up attributes
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
     gl.vertexAttribPointer(
       programInfo.attribLocations.vertexPosition,
-      3, // numComponents
-      gl.FLOAT, // type
-      false, // normalize
-      0, // stride
-      0 // offset
+      3,
+      gl.FLOAT,
+      false,
+      0,
+      0
     );
     gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
 
-    // Set up texture coordinates
     gl.bindBuffer(gl.ARRAY_BUFFER, buffers.textureCoord);
     gl.vertexAttribPointer(
       programInfo.attribLocations.textureCoord,
-      2, // numComponents
-      gl.FLOAT, // type
-      false, // normalize
-      0, // stride
-      0 // offset
+      2,
+      gl.FLOAT,
+      false,
+      0,
+      0
     );
     gl.enableVertexAttribArray(programInfo.attribLocations.textureCoord);
 
-    gl.useProgram(programInfo.program);
+    // Set up texture
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.uniform1i(programInfo.uniformLocations.uSampler, 0);
 
+    // Bind indices
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
+  }
+
+  function refresh() {
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Update projection matrix only when FOV or aspect ratio changes
+    mat4.perspective(projectionMatrix, fov, width / height, 0.1, 100.0);
     gl.uniformMatrix4fv(
       programInfo.uniformLocations.projectionMatrix,
       false,
       projectionMatrix
     );
+
+    // Update model view matrix for rotation
+    mat4.identity(modelViewMatrix);
+    mat4.rotate(modelViewMatrix, modelViewMatrix, pitch, [1, 0, 0]);
+    mat4.rotate(modelViewMatrix, modelViewMatrix, yaw, [0, 1, 0]);
     gl.uniformMatrix4fv(
       programInfo.uniformLocations.modelViewMatrix,
       false,
       modelViewMatrix
     );
 
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.uniform1i(programInfo.uniformLocations.uSampler, 0);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
+    // Draw
     gl.drawElements(
       gl.TRIANGLES,
       geometry.indices.length,
@@ -440,21 +444,21 @@ function createPanoramaViewer(elmId: string, url: string) {
     },
     set yaw(value) {
       yaw = deg2rad(value);
-      drawScene();
+      refresh();
     },
     get pitch() {
       return rad2deg(pitch);
     },
     set pitch(value) {
       pitch = deg2rad(value);
-      drawScene();
+      refresh();
     },
     get fov() {
       return rad2deg(fov);
     },
     set fov(value) {
       fov = deg2rad(clamp(value, MIN_FOV, MAX_FOV));
-      drawScene();
+      refresh();
     },
   };
 }
