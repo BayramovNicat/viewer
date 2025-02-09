@@ -428,6 +428,10 @@ export function equirectangularTilesAdapter(
           const material = new MeshBasicMaterial({
             map: createTexture(image, mipmaps),
           });
+          // material.onBeforeCompile = function (shader) {
+          //   console.log(shader.vertexShader); // Logs the vertex shader
+          //   console.log(shader.fragmentShader); // Logs the fragment shader
+          // };
           __swapMaterial(tile, material, false);
           needsUpdate();
         }
@@ -645,15 +649,6 @@ function getTileConfig(
   return computeTileConfig(tile, level, data);
 }
 
-function getTileIndexByZoomLevel<T extends { zoomRange: [number, number] }>(
-  levels: T[],
-  zoomLevel: number
-): number {
-  return levels.findIndex((level) => {
-    return zoomLevel >= level.zoomRange[0] && zoomLevel <= level.zoomRange[1];
-  });
-}
-
 function computeTileConfig(
   tile: EquirectangularTileLevel,
   level: number,
@@ -667,6 +662,15 @@ function computeTileConfig(
     facesByCol: data.SPHERE_SEGMENTS / tile.cols,
     facesByRow: data.SPHERE_HORIZONTAL_SEGMENTS / tile.rows,
   };
+}
+
+function getTileIndexByZoomLevel<T extends { zoomRange: [number, number] }>(
+  levels: T[],
+  zoomLevel: number
+): number {
+  return levels.findIndex((level) => {
+    return zoomLevel >= level.zoomRange[0] && zoomLevel <= level.zoomRange[1];
+  });
 }
 
 function meshes(group: Group) {

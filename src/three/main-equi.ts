@@ -1,4 +1,4 @@
-import "./style.css";
+import "../style.css";
 import {
   LinearFilter,
   LinearMipmapLinearFilter,
@@ -307,9 +307,13 @@ async function init() {
   camera.matrixAutoUpdate = false;
 
   const scene = new Scene();
-  const textureData = await loadTexture("./panorama.jpeg");
+  const textureData = await loadTexture("./panorama/panorama.jpg");
   textureData.texture.colorSpace = SRGBColorSpace;
   const mesh = createMesh(textureData.panoData!);
+  mesh.material.onBeforeCompile = (shader) => {
+    console.log(shader.vertexShader); // Logs the vertex shader
+    console.log(shader.fragmentShader); // Logs the fragment shader
+  };
   mesh.material.map = textureData.texture; // Assign the texture to the material
   scene.add(mesh);
 

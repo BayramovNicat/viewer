@@ -7,7 +7,7 @@ import {
   WebGLRenderer,
 } from "three";
 import { equirectangularTilesAdapter } from "./core/equirectangularTilesAdapter";
-import "./style.css";
+import "../style.css";
 
 const SPHERE_RADIUS = 10;
 const vector = new Vector3();
@@ -48,9 +48,9 @@ async function init() {
     width: 8192,
     cols: 16,
     rows: 8,
-    baseUrl: `./panorama_thumb.jpeg`,
+    baseUrl: `./panorama/panorama_thumb.jpg`,
     tileUrl: (col: number, row: number) => {
-      return `./tiles/image${col + 1}x${row + 1}.jpg`;
+      return `./panorama/tiles/image${col + 1}x${row + 1}.jpg`;
     },
   });
   textureData.texture.colorSpace = SRGBColorSpace;
@@ -162,6 +162,8 @@ async function init() {
     camera.updateMatrixWorld();
 
     renderer.render(scene, camera);
+
+    // console.log(renderer.info.programs);
   }
 }
 

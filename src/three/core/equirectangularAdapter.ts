@@ -1,4 +1,5 @@
 import {
+  ImageLoader,
   LinearFilter,
   LinearMipmapLinearFilter,
   Mesh,
@@ -49,6 +50,11 @@ export function equirectangularAdapter(
       depthWrite: false,
     });
 
+    material.onBeforeCompile = function (shader) {
+      console.log(shader.vertexShader); // Logs the vertex shader
+      console.log(shader.fragmentShader); // Logs the fragment shader
+    };
+
     return new Mesh(geometry, material);
   }
 
@@ -58,12 +64,12 @@ export function equirectangularAdapter(
     const cleanPanorama: EquirectangularPanorama = {
       path: panorama,
     };
-    const blob = await loadFile(
+    const img = await loadImage(
       cleanPanorama.path,
       undefined,
       cleanPanorama.path
     );
-    const img = await blobToImage(blob);
+    // const img = await blobToImage(blob);
     const panoData = mergePanoData(img.width, img.height);
     const texture = createEquirectangularTexture(img);
 
@@ -79,6 +85,7 @@ export function equirectangularAdapter(
     mesh: EquirectangularMesh,
     textureData: EquirectangularTextureData
   ) {
+    console.log(textureData);
     mesh.material.map = textureData.texture;
   }
 
@@ -222,6 +229,46 @@ function createTexture(img: TexImageSource, mimaps = false): Texture {
   texture.generateMipmaps = mimaps;
   texture.anisotropy = mimaps ? 2 : 1;
   return texture;
+}
+
+const imageLoader = new ImageLoader();
+
+function loadImage(
+  url: string,
+  onProgress?: (p: number) => void,
+  cacheKey?: string
+): Promise<HTMLImageElement> {
+  const cached = Cache.get(url, cacheKey!);
+
+  if (cached) {
+    onProgress?.(100);
+    if (cached instanceof Blob) {
+      // unlikely case when the image has already been loaded with the FileLoader
+      return blobToImage(cached);
+    } else {
+      return Promise.resolve(cached);
+    }
+  }
+
+  if (!onProgress) {
+    return new Promise((resolve, reject) => {
+      imageLoader.load(
+        url,
+        (result) => {
+          Cache.add(url, cacheKey!, result);
+          resolve(result);
+        },
+        (err) => {
+          reject(err);
+        }
+        //   __getAbortSignal(cacheKey)
+      );
+    });
+  } else {
+    return loadFile(url, onProgress, cacheKey).then((blob) =>
+      blobToImage(blob)
+    );
+  }
 }
 
 const fileLoader = new BlobLoader();
